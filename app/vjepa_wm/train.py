@@ -639,17 +639,18 @@ def main(args, resume_preempt=False):
                 logger.info(f"loaded pretrained head named {name} from epoch {epoch} with msg: {msg}")
                 del checkpoint
 
-    # DDP wrapping after loading state_dicts
-    if not freeze_encoder:
-        encoder = DDP(encoder, static_graph=False, find_unused_parameters=False)
-    if train_predictor:
-        if action_encoder is not None:
-            action_encoder = DDP(action_encoder, static_graph=False, find_unused_parameters=False)
-        if proprio_encoder is not None:
-            proprio_encoder = DDP(proprio_encoder, static_graph=False, find_unused_parameters=False)
-        predictor = DDP(predictor, static_graph=False, find_unused_parameters=False)
-    for name in heads.keys():
-        heads[name].model = DDP(heads[name].model, static_graph=False, find_unused_parameters=False)
+    # DDP wrapping after loading state_dicts (skip for single-GPU: NCCL hangs on world_size=1)
+    if world_size > 1:
+        if not freeze_encoder:
+            encoder = DDP(encoder, static_graph=False, find_unused_parameters=False)
+        if train_predictor:
+            if action_encoder is not None:
+                action_encoder = DDP(action_encoder, static_graph=False, find_unused_parameters=False)
+            if proprio_encoder is not None:
+                proprio_encoder = DDP(proprio_encoder, static_graph=False, find_unused_parameters=False)
+            predictor = DDP(predictor, static_graph=False, find_unused_parameters=False)
+        for name in heads.keys():
+            heads[name].model = DDP(heads[name].model, static_graph=False, find_unused_parameters=False)
 
     # Prepare VideoWM kwargs from config
     wm_kwargs = {

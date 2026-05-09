@@ -62,6 +62,8 @@ class DROIDVideoDataset(torch.utils.data.Dataset):
         local: bool = True,
         seed: int = None,
         dset_fraction: float = 1.0,
+        split: str = None,
+        split_ratio: float = 0.9,
     ):
         self.data_path = data_path
         self.frames_per_clip = frames_per_clip
@@ -76,6 +78,9 @@ class DROIDVideoDataset(torch.utils.data.Dataset):
         self.droid_to_rcasa_action_format = droid_to_rcasa_action_format
         self.local = local
         self.seed = seed
+        self.split = split
+        self.split_ratio = split_ratio
+        self.clip_index = None  # Set after init for split='val'
         # Same sample-level across workers because same self.rng pickled across workers
         # This randomness only affects clip slicing and camera viewpoint sampling.
         # (a torch.Generator() is not picklable)
@@ -110,6 +115,7 @@ class DROIDVideoDataset(torch.utils.data.Dataset):
             logger.info(f"Slicing dataset from {original_len} to {num_samples} samples ({dset_fraction*100:.1f}%)")
         else:
             logger.info(f"Not slicing DROID dataset, using {len(self.samples)} samples, 100% of video paths")
+
         # Taken from other custom datasets
         states = []
         actions = []
@@ -146,6 +152,57 @@ class DROIDVideoDataset(torch.utils.data.Dataset):
         self.actions = (self.actions - self.action_mean) / self.action_std
         self.proprios = (self.proprios - self.proprio_mean) / self.proprio_std
 
+        if self.split in ('train', 'val'):
+            logger.info(f"Building clip index for '{self.split}' split...")
+            self.clip_index = self._build_clip_index()
+            logger.info(f"Clip index '{self.split}': {len(self.clip_index)} clips from {len(self.samples)} trajectories")
+
+    def _get_vlen(self, path: str) -> int:
+        """Get trajectory length from HDF5 state array (same length as video)."""
+        if self.mpk_dset:
+            with h5py.File(path, 'r') as traj:
+                return len(traj["episode_data"]["observation"]["cartesian_position"])
+        else:
+            tpath = os.path.join(path, self.h5_name)
+            with h5py.File(tpath, 'r') as traj:
+                return len(traj["observation"]["robot_state"]["cartesian_position"])
+
+    def _build_clip_index(self) -> list[tuple[int, int]]:
+        """
+        Enumerate all non-overlapping clips across all trajectories, shuffle with
+        fixed seed, then slice: train takes the first split_ratio fraction, val
+        takes the rest. Both instances see the same full clip list before slicing,
+        so the splits are guaranteed disjoint.
+        """
+        assumed_vfps = 30
+        fstp = ceil(assumed_vfps / (self.fps if self.fps is not None else assumed_vfps))
+        nframes = int(self.frames_per_clip * fstp)
+
+        all_clips: list[tuple[int, int]] = []
+        for i, path in enumerate(tqdm(self.samples, desc="Scanning trajectories for clip index")):
+            try:
+                vlen = self._get_vlen(path)
+                if vlen < nframes:
+                    continue
+                n_clips = (vlen - nframes) // nframes + 1
+                for j in range(n_clips):
+                    ef = nframes + (j + 1) * nframes
+                    all_clips.append((i, min(ef, vlen)))
+            except Exception as e:
+                logger.warning(f"Skipping trajectory in clip index: {path}: {e}")
+
+        rng = np.random.RandomState(self.seed if self.seed is not None else 0)
+        rng.shuffle(all_clips)
+
+        n_total = len(all_clips)
+        n_train = max(1, int(n_total * self.split_ratio))
+        if self.split == 'train':
+            clips = all_clips[:n_train]
+        else:
+            clips = all_clips[n_train:]
+        logger.info(f"Clip-level split '{self.split}': {len(clips)}/{n_total} clips")
+        return [(int(c[0]), int(c[1])) for c in clips]
+
     def get_data_mean_std(self, data, traj_lengths):
         all_data = []
         for traj in range(len(traj_lengths)):
@@ -157,30 +214,46 @@ class DROIDVideoDataset(torch.utils.data.Dataset):
         data_std = torch.std(all_data, dim=0)
         return data_mean, data_std
 
+    def __len__(self):
+        if self.clip_index is not None:
+            return len(self.clip_index)
+        return len(self.samples)
+
     def __getitem__(self, idx, debug=False, **kwargs):
-        path = self.samples[idx]
+        if self.clip_index is not None:
+            traj_idx, predetermined_ef = self.clip_index[idx]
+            path = self.samples[traj_idx]
+        else:
+            path = self.samples[idx]
+            predetermined_ef = None
 
         # -- keep trying to load videos until you find a valid sample
         loaded_video = False
         while not loaded_video:
             if debug:
                 if self.mpk_dset:
-                    buffer, actions, states, extrinsics, indices = self.loadvideo_hf(path)
+                    buffer, actions, states, extrinsics, indices = self.loadvideo_hf(path, ef=predetermined_ef)
                 else:
-                    buffer, actions, states, extrinsics, indices = self.loadvideo_decord(path)
+                    buffer, actions, states, extrinsics, indices = self.loadvideo_decord(path, ef=predetermined_ef)
                 loaded_video = True
             else:
                 try:
                     if self.mpk_dset:
-                        buffer, actions, states, extrinsics, indices = self.loadvideo_hf(path)
+                        buffer, actions, states, extrinsics, indices = self.loadvideo_hf(path, ef=predetermined_ef)
                     else:
-                        buffer, actions, states, extrinsics, indices = self.loadvideo_decord(path)
+                        buffer, actions, states, extrinsics, indices = self.loadvideo_decord(path, ef=predetermined_ef)
                     loaded_video = True
                 except Exception as e:
                     logger.info(f"Ecountered exception when loading video {path=} {e=}")
                     loaded_video = False
-                    idx = self.rng.randint(0, self.__len__())
-                    path = self.samples[idx]
+                    if self.clip_index is not None:
+                        retry = self.rng.randint(0, len(self.clip_index))
+                        traj_idx, predetermined_ef = self.clip_index[retry]
+                        path = self.samples[traj_idx]
+                    else:
+                        idx = self.rng.randint(0, len(self.samples))
+                        path = self.samples[idx]
+                        predetermined_ef = None
         obs = {
             "visual": buffer,
             "proprio": states,
@@ -245,7 +318,7 @@ class DROIDVideoDataset(torch.utils.data.Dataset):
             paths.extend(found)
         return [str(p) for p in paths]
 
-    def loadvideo_hf(self, path):
+    def loadvideo_hf(self, path, ef: int = None):
         """
         Returns:
             buffer: torch.Tensor of shape [T, C, H, W] with video frames
@@ -275,7 +348,10 @@ class DROIDVideoDataset(torch.utils.data.Dataset):
         if vlen < nframes:
             raise Exception(f"Video is too short {path=}, {nframes=}, {vlen=}")
 
-        ef = self.rng.randint(nframes, vlen)
+        if ef is None:
+            ef = self.rng.randint(nframes, vlen)
+        else:
+            ef = min(ef, vlen)
         sf = ef - nframes
         indices = np.arange(sf, sf + nframes, fstp).astype(np.int64)
 
@@ -289,7 +365,7 @@ class DROIDVideoDataset(torch.utils.data.Dataset):
             buffer = self.transform(buffer)
         return buffer, actions, states, None, indices
 
-    def loadvideo_decord(self, path):
+    def loadvideo_decord(self, path, ef: int = None):
         """
         Returns:
             buffer: torch.Tensor of shape [T, C, H, W] with video frames
@@ -333,8 +409,11 @@ class DROIDVideoDataset(torch.utils.data.Dataset):
         if vlen < nframes:
             raise Exception(f"Video is too short {vpath=}, {nframes=}, {vlen=}")
 
-        # sample a random window of nframes
-        ef = self.rng.randint(nframes, vlen)
+        # sample a random window of nframes (or use predetermined ef for val split)
+        if ef is None:
+            ef = self.rng.randint(nframes, vlen)
+        else:
+            ef = min(ef, vlen)
         sf = ef - nframes
         indices = np.arange(sf, sf + nframes, fstp).astype(np.int64)
         # --
@@ -354,10 +433,6 @@ class DROIDVideoDataset(torch.utils.data.Dataset):
             buffer = self.transform(buffer)
 
         return buffer, actions, states, extrinsics, indices
-
-    def __len__(self):
-        return len(self.samples)
-
 
 DROID_ACTION_TYPES = [
     "action",

@@ -222,6 +222,7 @@ def build_plan_eval_args(
     num_elites_values = _to_list(num_elites)
 
     args_eval = []
+    _cpus = 12
     for eval_cfg_path in eval_cfg_paths:
         planning_cfg_template = load_yaml(eval_cfg_path)
 

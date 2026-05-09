@@ -81,6 +81,12 @@ def _build_dataset_paths():
             "Robocasa": f"{dataset_root}/robocasa/",
             "DROID": f"{dataset_root}/DROID/droid_paths.csv",
             "Franka_hf": f"{dataset_root}/franka_custom",
+            # UR5 robot datasets
+            "UR5": f"{dataset_root}/ur5_combined_paths.csv",
+            "UR5_0409_action": f"{dataset_root}/ur5_vjepa_0409_action/train_paths.csv",
+            "UR5_0421": f"{dataset_root}/ur5_vjepa_0421/train_paths.csv",
+            "UR5_0501_bowl": f"{dataset_root}/ur5_vjepa_0501_bowl/train_paths.csv",
+            "UR5_0501_random": f"{dataset_root}/ur5_vjepa_0501_random/train_paths.csv",
             # Video datasets
             "K400": f"{dataset_root}/kinetics400/k400_train_paths.csv",
             "K400_val": f"{dataset_root}/kinetics400/k400_val_paths.csv",

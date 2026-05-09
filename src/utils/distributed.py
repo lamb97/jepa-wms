@@ -83,8 +83,9 @@ def init_distributed(
         if nccl_timeout_minutes is not None:
             logger.info(f"Initializing distributed with timeout={nccl_timeout_minutes} minutes")
             nccl_timeout = datetime.timedelta(minutes=nccl_timeout_minutes)
+        backend = "gloo" if world_size == 1 else "cpu:gloo,cuda:nccl"
         torch.distributed.init_process_group(
-            backend="cpu:gloo,cuda:nccl",
+            backend=backend,
             world_size=world_size,
             rank=rank,
             timeout=nccl_timeout,

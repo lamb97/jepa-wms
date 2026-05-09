@@ -88,8 +88,9 @@ def init_data(
     logger.info(f"📂 Data paths: {data_paths}")
     shuffle = True
     if dataset_type == "custom":
-        if all("droid" in p for p in data_paths) or all("franka_custom" in p for p in data_paths):
+        if all("droid" in p for p in data_paths) or all("franka_custom" in p for p in data_paths) or all("ur5" in p for p in data_paths):
             # We never pass the normalize_action argument to DROIDVideoDataset
+            _val_split_ratio = split_ratio if split_ratio is not None else 0.9
             dataset = DROIDVideoDataset(
                 data_path=data_paths[0],
                 frames_per_clip=dataset_fpcs[0],
@@ -103,22 +104,29 @@ def init_data(
                 seed=seed,
                 dset_fraction=dset_fraction,
                 action_skip=action_skip,
+                split='train',
+                split_ratio=_val_split_ratio,
             )
-            if val_data_paths:
-                val_dataset = DROIDVideoDataset(
-                    data_path=val_data_paths[0],
-                    frames_per_clip=val_dataset_fpcs[0],
-                    transform=transform,
-                    fps=fps,
-                    camera_views=val_dataset_camera_views,
-                    mpk_manifest_patterns=mpk_manifest_patterns,
-                    mpk_dset=all("franka_custom" in p for p in val_data_paths),
-                    camera_frame=camera_frame,
-                    droid_to_rcasa_action_format=droid_to_rcasa_action_format,
-                    seed=seed,
-                    dset_fraction=val_dset_fraction,
-                    action_skip=action_skip,
-                )
+            # Val dataset: use explicit val_data_paths if provided, otherwise build a
+            # trajectory-level split from the same paths (disjoint from train).
+            _val_source = val_data_paths if val_data_paths else data_paths
+            _val_mpk = all("franka_custom" in p for p in _val_source)
+            val_dataset = DROIDVideoDataset(
+                data_path=_val_source[0],
+                frames_per_clip=val_dataset_fpcs[0],
+                transform=transform,
+                fps=fps,
+                camera_views=val_dataset_camera_views,
+                mpk_manifest_patterns=mpk_manifest_patterns,
+                mpk_dset=_val_mpk,
+                camera_frame=camera_frame,
+                droid_to_rcasa_action_format=droid_to_rcasa_action_format,
+                seed=seed,
+                dset_fraction=val_dset_fraction if val_data_paths else dset_fraction,
+                action_skip=action_skip,
+                split='val',
+                split_ratio=_val_split_ratio,
+            )
             datasets = {"train": dataset, "valid": val_dataset}
             traj_dsets = {"train": dataset, "valid": val_dataset}
         elif all("metaworld" in p.lower() for p in data_paths) or all("tdmpc2" in p for p in data_paths):
