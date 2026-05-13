@@ -2,7 +2,7 @@ app: vjepa_wm
 nodes: 1
 tasks_per_node: 1
 cpus_per_task: 8
-folder: ${JEPAWM_LOGS}/ur5/ur5_4fpcs_fps4_r256_dv3vitl_pred_AdaLN_depth12_2roll_1n
+folder: ${JEPAWM_LOGS}/ur5/ur5_4fpcs_fps2_r256_dv3vitl_pred_AdaLN_depth12_2roll_1n_proprio
 data:
   # Dataset configuration
   dataset_type: custom
@@ -49,7 +49,7 @@ data:
       - left_mp4_path
     droid_to_rcasa_action_format: 1
     rcasa_to_droid_action_format: null
-    fps: 4
+    fps: 2
     dataset_fpcs: [12]
     mpk_manifest_patterns: null
 data_aug:
@@ -88,8 +88,8 @@ meta:
   read_checkpoint: null
   seed: 42
   eval_freq: 3
-  light_eval_freq: 62
-  save_every_freq: 3
+  light_eval_freq: 100
+  save_every_freq: 10
   dtype: bfloat16
   data_traj_rollout_eval:
     do_data_traj_rollout_eval: true
@@ -97,16 +97,16 @@ meta:
     data_traj_decode_gt: true
     data_traj_eval_ctxt_window: 3
   energy_landscape_eval:
-    do_energy_landscape_eval: false
+    do_energy_landscape_eval: true
     energy_landscape_rollout_steps: 1
-    energy_landscape_ctxt_window: 3
+    energy_landscape_ctxt_window: 1
 model:
   # Shared fields
   grid_size: 16
   tubelet_size_enc: 1
-  use_activation_checkpointing: false
+  use_activation_checkpointing: true
   action_conditioning: token
-  proprio_encoding: none
+  proprio_encoding: feature
   num_frames_pred: 12
   # Visual encoder config
   visual_encoder:
@@ -129,7 +129,7 @@ model:
   # Proprio encoder config
   proprio_encoder:
     proprio_tokens: 0
-    proprio_emb_dim: 0
+    proprio_emb_dim: 32
     prop_mlp: false
     proprio_encoder_inpred: false
   # Predictor config — JEPA-WM AdaLN
@@ -199,7 +199,7 @@ optimization:
       start_lr: 0.0
       ref_lr: 5.e-4
       warmup: 10
-      num_epochs: 200
+      num_epochs: 400
       iterations_per_epoch: 64
       clip_grad: 1.0
       mixed_precision: true
@@ -212,7 +212,7 @@ optimization:
     eps: 1.e-8
     weight_decay: 1.e-7
     final_weight_decay: 1.e-6
-    num_epochs: 200
+    num_epochs: 400
     warmup: 10
     start_lr: 5.e-4
     ref_lr: 5.e-4

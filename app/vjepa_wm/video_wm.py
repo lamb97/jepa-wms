@@ -774,6 +774,8 @@ class VideoWM(nn.Module):
             AMAX, env_name = 1.0, "wall"
         elif "droid" in dataset_path.lower():
             AMAX, env_name = 0.1, "droid"
+        elif "ur5" in dataset_path.lower():
+            AMAX, env_name = 0.1, "ur5"
         N1, N2 = 40, 40
         for batch_idx in range(b):
             DIMS = {"dx": 0, "dy": 1, "dz": 2}
@@ -836,12 +838,12 @@ class VideoWM(nn.Module):
 
                 batch_actions = preprocessor.normalize_actions(batch_actions).to(self.device, dtype=torch.float32)
                 encoded_batch_actions = self.encode_act(batch_actions)
-                # Create context actions up to ctxt_idx to match what rollout expects
-                # rollout will slice action_features[:, :t+1] for sequential mode
+                # Context actions strictly BEFORE ctxt_idx so candidate goes at index ctxt_idx
+                # (rollout's act_feats_suffix[:, 0] must be the candidate, not the real action)
                 encoded_act_context = (
-                    act_feat[:, : ctxt_idx + 1].repeat(proc_B, 1, 1, 1)
+                    act_feat[:, : ctxt_idx].repeat(proc_B, 1, 1, 1)
                     if action_features.ndim == 4
-                    else act_feat[:, : ctxt_idx + 1].repeat(proc_B, 1, 1)
+                    else act_feat[:, : ctxt_idx].repeat(proc_B, 1, 1)
                 )
                 # Handle proprio_features repeat robustly based on dimensionality
                 repeated_prop_feat = (

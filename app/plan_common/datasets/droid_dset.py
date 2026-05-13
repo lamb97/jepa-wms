@@ -174,7 +174,7 @@ class DROIDVideoDataset(torch.utils.data.Dataset):
         takes the rest. Both instances see the same full clip list before slicing,
         so the splits are guaranteed disjoint.
         """
-        assumed_vfps = 30
+        assumed_vfps = 20
         fstp = ceil(assumed_vfps / (self.fps if self.fps is not None else assumed_vfps))
         nframes = int(self.frames_per_clip * fstp)
 
@@ -338,7 +338,7 @@ class DROIDVideoDataset(torch.utils.data.Dataset):
         )  # [T, 7]
 
         # sample a random window of nframes
-        vfps = 30
+        vfps = 20
         fpc = self.frames_per_clip
         fps = self.fps if self.fps is not None else vfps
         fstp = ceil(vfps / fps)
